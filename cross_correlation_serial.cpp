@@ -92,7 +92,8 @@ int main(int argc, char* argv[]){
     const int N_window_result = 2*N-1;
 
 
-    cv::VideoCapture cap(video_pth); 
+    // cv::VideoCapture cap(video_pth); 
+    cv::VideoCapture cap(video_pth, cv::CAP_FFMPEG);
     if (!cap.isOpened()){
         throw std::runtime_error("ERROR: Something wrong with the video");
     }
