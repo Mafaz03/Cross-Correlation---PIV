@@ -44,7 +44,7 @@ std::tuple<int, int, int> argmax(int* matrix, int rows, int cols){
     int max_col = 0;
     int max_ele = matrix[0];
 
-    #pragma omp parallel for collapse(2)
+    // #pragma omp parallel for collapse(2) reduction(max: max_ele)
     for (int i = 0; i < rows; i++){
         for (int j = 0; j < cols; j++){
             if (matrix[i * cols + j]  > max_ele){
@@ -104,6 +104,10 @@ int main(int argc, char* argv[]){
     const int N = 15;
     const int N_window_result = 2*N-1;
 
+    const int step = N/2;  // 50% overlap
+    int ny = (NN - N) / step;
+    int nx = (NN - N) / step;
+
 
     cv::VideoCapture cap(video_pth); 
     if (!cap.isOpened()){
@@ -121,10 +125,11 @@ int main(int argc, char* argv[]){
     // rank 3: 750 -> 1000
 
     cap.set(cv::CAP_PROP_POS_FRAMES, start_frame);
-    
     cv::Mat frame_after, frame_before;
-
     cap.read(frame_before);
+
+    std::vector<std::vector<int>> U(ny, std::vector<int>(nx));
+    std::vector<std::vector<int>> V(ny, std::vector<int>(nx));
 
     int currentFrame = start_frame;
     double start = MPI_Wtime();
@@ -171,19 +176,24 @@ int main(int argc, char* argv[]){
         int W1[N][N];
         int W2[N][N];
 
-        const int step = N/2;  // 50% overlap
-        for (int shift_down = 0; shift_down < NN - N; shift_down += step){
-            for (int shift_right = 0; shift_right < NN - N; shift_right += step){
+        int shift_down, shift_right;
+        
+        #pragma omp parallel for collapse(2) schedule(dynamic) private(W1, W2)
+        for (int iy = 0; iy < ny; iy++){
+            for (int ix = 0; ix < nx; ix++){
+
+                shift_down  = iy * step;
+                shift_right = ix * step;
 
                 int R[N_window_result][N_window_result] = {0};
 
-                #pragma omp parallel for collapse(2)
                 for (int i = 0; i < N; i++){
                     for (int j = 0; j < N; j++){
                         W1[i][j] = Before[shift_down + i][shift_right + j];
                         W2[i][j] = After[shift_down + i][shift_right + j];
                     }
                 }
+
                 
                 for (int dy = -(N-1); dy <= N-1; dy++) {
                     for (int dx = -(N-1); dx <= N-1; dx++) {
@@ -208,13 +218,25 @@ int main(int argc, char* argv[]){
                     }
                 }
 
-                u_outFile << shift_cords.first << " ";
-                v_outFile << shift_cords.second << " ";
+                // u_outFile << shift_cords.first << " ";
+                // v_outFile << shift_cords.second << " ";
 
+                U[iy][ix] = shift_cords.first;
+                V[iy][ix] = shift_cords.second;
+
+            }
+            // u_outFile << "\n";
+            // v_outFile << "\n";
+            printf("RANK: %d/%d | FRAME: %d/%d| COLUMNS: %d/%d\n", rank, size, currentFrame, totalFrames, shift_down, NN-N);
+        }
+
+        for (int i = 0; i < ny; i++){
+            for (int j = 0; j < nx; j++){
+                u_outFile << U[i][j] << " ";
+                v_outFile << V[i][j] << " ";
             }
             u_outFile << "\n";
             v_outFile << "\n";
-            printf("RANK: %d/%d | FRAME: %d/%d| COLUMNS: %d/%d\n", rank, size, currentFrame, totalFrames, shift_down, NN-N);
         }
 
         u_outFile.close();
